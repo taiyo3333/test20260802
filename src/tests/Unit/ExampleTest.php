@@ -11,7 +11,6 @@ class ExampleTest extends TestCase
      */
     public function test_that_true_is_true(): void
     {
-        // デモ用にわざと失敗させている（本来は assertTrue(true)）
         $this->assertTrue(true);
     }
 }
