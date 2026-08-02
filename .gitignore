@@ -1,0 +1,24 @@
+# Laravel用の.gitignore
+/node_modules
+/public/hot
+/public/storage
+/storage/*.key
+/vendor
+.env
+.env.backup
+.phpunit.result.cache
+docker-compose.override.yml
+Homestead.json
+Homestead.yaml
+npm-debug.log
+yarn-error.log
+/.idea
+/.vscode
+
+# Docker関連
+db-store/
+ssl/
+
+# AIエージェントが生成する設定（講座内で各自が作成するため、テンプレートには含めない）
+.agents/
+.claude/
