@@ -1,4 +1,4 @@
-import { BASE_URL } from './api/client'
+import { BASE_URL, LARAVEL_URL } from './api/client'
 import { useTasks } from './hooks/useTasks'
 import FilterTabs from './components/FilterTabs'
 import TaskList from './components/TaskList'
@@ -73,11 +73,11 @@ export default function App() {
       <footer className="app-footer">
         <p className="hint">
           同じデータは Laravel 側の{' '}
-          <a href="http://localhost:8086/tasks" target="_blank" rel="noreferrer">
+          <a href={`${LARAVEL_URL}/tasks`} target="_blank" rel="noreferrer">
             Blade 版
           </a>
           {' / '}
-          <a href="http://localhost:8086/tasks-api" target="_blank" rel="noreferrer">
+          <a href={`${LARAVEL_URL}/tasks-api`} target="_blank" rel="noreferrer">
             fetch 版
           </a>
           {' '}からも見られます。入口が3つあるだけで、Model と DB は同じものです。

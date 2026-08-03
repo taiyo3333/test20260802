@@ -22,6 +22,16 @@ export function useTasks() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
 
+  // 「読み直して」の合図。この数字が変わると下の useEffect が動く。
+  //
+  // 追加や削除のあとに load() を直接呼ばないのがポイント。
+  // 直接呼ぶと、その関数が作られた時点の filter / page を握ったまま実行されるので、
+  // 通信中にユーザーが絞り込みを切り替えると、切り替え前の条件で取り直した結果が
+  // あとから届いて画面を上書きしてしまう。
+  // 合図だけ出して、実際の読み込みは常に「今の filter / page」で行う。
+  const [version, setVersion] = useState(0)
+  const reload = useCallback(() => setVersion((v) => v + 1), [])
+
   // 「今いちばん新しい読み込み」を見分けるための通し番号。
   //
   // 通信は必ずしも送った順に返ってこない。
@@ -61,14 +71,15 @@ export function useTasks() {
     }
   }, [filter, page])
 
-  // 起動時と、filter / page が変わった時に読み直す。
+  // 起動時と、filter / page / version が変わった時に読み直す。
+  // 読み込みの入口をこの1か所に絞るのが大事（下の reload のコメント参照）。
   //
   // ※ 開発中は main.jsx の <StrictMode> のせいで、初回だけ意図的に2回走る。
   //   （後片付け漏れを見つけるための React の仕様。本番ビルドでは1回だけ）
   //   通信ログに GET が2本出るのはこのため。
   useEffect(() => {
     load()
-  }, [load])
+  }, [load, version])
 
   /** 絞り込みを変える。ページ番号は1に戻す */
   const changeFilter = useCallback((nextFilter) => {
@@ -83,13 +94,11 @@ export function useTasks() {
   const create = useCallback(
     async (input) => {
       await taskApi.createTask(input)
-      if (page !== 1) {
-        setPage(1) // ページが変わるので useEffect 側が読み直してくれる
-      } else {
-        await load()
-      }
+      // 追加したものが見えるよう1ページ目へ
+      setPage(1)
+      reload()
     },
-    [page, load],
+    [reload],
   )
 
   /**
@@ -102,27 +111,27 @@ export function useTasks() {
   const toggle = useCallback(
     async (id) => {
       await taskApi.toggleTask(id)
-      await load()
+      reload()
     },
-    [load],
+    [reload],
   )
 
   /** 部分更新。changes に入れた項目だけが変わる（is_done は巻き添えにならない） */
   const update = useCallback(
     async (id, changes) => {
       await taskApi.updateTask(id, changes)
-      await load()
+      reload()
     },
-    [load],
+    [reload],
   )
 
   /** 削除 */
   const remove = useCallback(
     async (id) => {
       await taskApi.deleteTask(id)
-      await load()
+      reload()
     },
-    [load],
+    [reload],
   )
 
   return {
@@ -139,6 +148,6 @@ export function useTasks() {
     toggle,
     update,
     remove,
-    reload: load,
+    reload,
   }
 }

@@ -19,6 +19,9 @@ yarn-error.log
 db-store/
 ssl/
 
+# frontend のビルド成果物（サーバー側で npm run build して生成する）
+/src/public/app
+
 # AIエージェントが生成する設定（講座内で各自が作成するため、テンプレートには含めない）
 .agents/
 .claude/

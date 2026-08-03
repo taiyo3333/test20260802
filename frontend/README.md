@@ -93,6 +93,80 @@ Laravel が自動で 204 を返してくれます。DevTools の Network タブ�
 
 ---
 
+## 本番（EC2）へのデプロイ
+
+本番では **React も Laravel も同じドメイン**から配ります。
+
+| | URL |
+|---|---|
+| Blade版 | https://task.taiyo333.com/tasks |
+| fetch版 | https://task.taiyo333.com/tasks-api |
+| **React版** | https://task.taiyo333.com/app/ |
+| API | https://task.taiyo333.com/api/tasks |
+
+同一オリジンになるので **本番では CORS が一切発生しません**。
+`.env.production` が `VITE_API_BASE_URL=/api`（相対パス）になっているためです。
+
+### 手順
+
+```bash
+cd <リポジトリ>
+git pull
+
+# 1. Laravel 側のキャッシュを捨てる
+docker compose -f docker-compose.yml -f docker-compose.prod.yml exec app php artisan optimize:clear
+
+# 2. nginx の設定が変わったのでコンテナを作り直す（後述の注意を参照）
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --force-recreate web
+
+# 3. React をビルドする（成果物は src/public/app に出る）
+cd frontend
+npm ci
+npm run build
+```
+
+Node が入っていないサーバーなら、Docker で代用できます。
+
+```bash
+docker run --rm -v "$PWD/frontend":/work -w /work node:22-alpine \
+  sh -c "npm ci && npm run build"
+```
+
+> composer の新規パッケージもマイグレーションも増えていないので、
+> `composer install` と `php artisan migrate` は不要です。
+
+### ⚠️ nginx 設定を変えたら「reload」では足りない
+
+`docker-compose.yml` は設定ファイルを**1ファイル単位**でマウントしています。
+
+```yaml
+- ./infra/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+```
+
+この形だとコンテナはファイルの実体（inode）を掴むため、
+エディタや `git pull` がファイルを**置き換える**と、コンテナ側は古い中身のままになります。
+`nginx -s reload` をしても変わりません。**コンテナごと作り直してください。**
+
+```bash
+docker compose ... up -d --force-recreate web
+```
+
+反映されたかは、コンテナの中を直接見るのが確実です。
+
+```bash
+docker compose exec web grep -c "location /app/" /etc/nginx/conf.d/default.conf   # 1 なら反映済み
+```
+
+### 仕組み
+
+- `vite.config.js` の `base: '/app/'` … JS/CSS の参照先を `/app/...` にする
+- `vite.config.js` の `outDir: '../src/public/app'` … nginx の公開ディレクトリ配下に出す
+- `infra/nginx/default.conf` の `location /app/` … 静的ファイルとして配る
+
+ビルド成果物（`src/public/app`）は `.gitignore` 済みです。**サーバー側でビルドします。**
+
+---
+
 ## ファイル構成
 
 ```

@@ -18,6 +18,17 @@ const BASE_URL =
 export { BASE_URL }
 
 /**
+ * Laravel 本体（Blade 版などの画面）の場所。
+ *
+ * API の URL から末尾の /api を落として求めている。
+ *   開発: 'http://localhost:8086/api' → 'http://localhost:8086'
+ *   本番: '/api'                      → ''（＝同じサーバーなので相対パスでよい）
+ *
+ * ここを直書きにすると本番でリンク先が localhost のままになってしまう。
+ */
+export const LARAVEL_URL = BASE_URL.replace(/\/api\/?$/, '')
+
+/**
  * API がエラーを返したことを表す例外。
  *
  * ふつうの Error と違って status（HTTPステータス）と errors（バリデーション内容）を持つ。
