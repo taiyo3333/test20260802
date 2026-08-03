@@ -6,8 +6,15 @@ Laravel の MVC を「動くもの」で理解するための最小構成のタ�
 - 完了 / 未完了の切り替え
 - 未完了 / 完了での絞り込み、ページ送り
 - 入力バリデーション（日本語メッセージ）
+- **同じデータを JSON API 経由で操作する画面**（→ [4. API 編](#4-api-編)）
 
-アクセス: http://localhost:8086/
+| 画面 | URL | 中身 |
+|------|-----|------|
+| Blade版 | http://localhost:8086/tasks | サーバーが HTML を組み立てて返す。操作のたびにページが再読み込みされる |
+| API版 | http://localhost:8086/tasks-api | サーバーは JSON を返すだけ。画面は JavaScript が組み立てる（リロードなし） |
+
+**どちらも同じ `tasks` テーブルを見ています。** 片方で追加したタスクはもう片方にも出ます。
+「M（Model）と DB は共通で、出口だけが2つある」という関係を確かめてみてください。
 
 ---
 
@@ -64,6 +71,17 @@ resources/views/tasks/index.blade.php    ← 【V】HTMLを組み立てる
 | DB | `src/database/seeders/TaskSeeder.php` | 初期データ投入 |
 | テスト | `src/tests/Feature/TaskTest.php` | URL を叩いて動作を検証 |
 
+API 編で追加したファイルは以下です（詳しくは [4. API 編](#4-api-編)）。
+
+| 種類 | ファイル | 役割 |
+|------|----------|------|
+| ルート | `src/routes/api.php` | `/api/～` の対応表。CSRF もセッションも無い道 |
+| **C** | `src/app/Http/Controllers/Api/TaskController.php` | View の代わりに JSON を返すコントローラー |
+| 変換 | `src/app/Http/Resources/TaskResource.php` | モデル → JSON の変換ルール（JSON版の View） |
+| 検証 | `src/app/Http/Requests/Api/UpdateTaskRequest.php` | API 用の更新バリデーション（部分更新に対応） |
+| **V** | `src/resources/views/tasks/api.blade.php` | fetch で API を叩く画面。通信ログ付き |
+| テスト | `src/tests/Feature/ApiTaskTest.php` | JSON で叩いて動作を検証 |
+
 ### `Route::resource` が作る7本
 
 ```
@@ -95,13 +113,236 @@ DELETE /tasks/{task}      → destroy  削除
 
 ---
 
-## 4. よく使うコマンド
+## 4. API 編
+
+ここまでは「サーバーが完成した HTML を返す」作りでした。
+API 編では **サーバーは JSON を返すだけにして、画面は JavaScript が組み立てる** 形を作ります。
+
+http://localhost:8086/tasks-api を開いて、追加・チェック・削除をしてみてください。
+**ページが一度もリロードされない**のと、画面下の「通信ログ」に何が飛んでいるかが出ます。
+
+### 4-1. リクエストの流れ（Blade版との違い）
+
+```
+【Blade版】ページごと作り直す
+  ブラウザ ──POST /tasks──▶ Controller ──▶ Model ──▶ DB
+                                              │
+  ブラウザ ◀──HTML一式（リダイレクト後）───────┘   ← 画面全体が再読み込み
+
+
+【API版】必要なデータだけやり取りする
+  ブラウザのJS ──fetch POST /api/tasks──▶ Api\Controller ──▶ Model ──▶ DB
+                     {"title":"牛乳を買う"}         │
+  ブラウザのJS ◀──JSON {"data":{...}} 201 ─────────┘
+       │
+       └─▶ JSが受け取った JSON から <li> を作って画面に差し込む  ← リロードなし
+```
+
+Model（`Task.php`）と DB は**どちらも全く同じものを使っています**。変わったのは出口だけです。
+
+### 4-2. web ルートと api ルートの違い
+
+`bootstrap/app.php` に1行足すと `routes/api.php` が有効になります。
+
+```php
+->withRouting(
+    web: __DIR__.'/../routes/web.php',
+    api: __DIR__.'/../routes/api.php',   // ← これ
+    ...
+)
+```
+
+| | `routes/web.php` | `routes/api.php` |
+|---|---|---|
+| URL | 書いたまま（`/tasks`） | 先頭に `/api` が付く（`/api/tasks`） |
+| CSRF | **必要**（`@csrf` が無いと 419） | **不要**（トークン無しで POST できる） |
+| セッション | あり（`session('status')` が使える） | なし（毎回まっさらなリクエスト） |
+| 返すもの | View（HTML） | JSON |
+| 想定する相手 | ブラウザのフォーム | JavaScript、スマホアプリ、他のサーバー |
+
+CSRF が要らないのは、API ルートが `web` ミドルウェアグループの外を通るからです。
+（`api` グループの中身はルートモデルバインディングだけ）
+
+### 4-3. `resource` と `apiResource`
+
+```php
+Route::resource('tasks', TaskController::class);          // 7本
+Route::apiResource('tasks', ApiTaskController::class);    // 5本
+```
+
+`apiResource` は `create`（作成フォーム画面）と `edit`（編集フォーム画面）を作りません。
+API は HTML のフォームを返さないので不要、という考え方です。
+
+```
+GET    /api/tasks        → index    一覧
+POST   /api/tasks        → store    保存
+GET    /api/tasks/{task} → show     詳細
+PUT    /api/tasks/{task} → update   更新
+PATCH  /api/tasks/{task} → update   部分更新
+DELETE /api/tasks/{task} → destroy  削除
+```
+
+これに加えて `PATCH /api/tasks/{task}/toggle` を独自に定義しています。
+
+> ルート名が web 側の `tasks.index` とぶつかるため、
+> `->names('api.tasks')` で `api.tasks.index` という名前にしています。
+
+### 4-4. API リソース（JSON版の View）
+
+コントローラーで `return $task;` と書くだけでも JSON にはなりますが、それだと
+
+- アクセサ（`$task->is_overdue`）が出てこない
+- `due_date` が `"2026-08-10T00:00:00.000000Z"` という扱いにくい形で出る
+- 将来 `password` のような列が増えたら、うっかり全部外に出てしまう
+
+という問題があります。`TaskResource` を1枚かませて「外に出す形」を自分で決めます。
+
+```php
+// src/app/Http/Resources/TaskResource.php
+return [
+    'id' => $this->id,
+    'title' => $this->title,
+    'due_date' => $this->due_date?->format('Y-m-d'),  // 好きな形に整形できる
+    'is_overdue' => $this->is_overdue,                // ★ここに書かないとJSONに出ない
+];
+```
+
+**ビューが HTML の見た目を決めるように、リソースは JSON の形を決める係**だと思ってください。
+
+`paginate()` の結果を渡すと、ページ送りの情報が自動で付きます。
+
+```json
+{
+  "data":  [ { "id": 1, "title": "牛乳を買う", ... } ],
+  "links": { "first": "...", "next": "..." },
+  "meta":  { "current_page": 1, "last_page": 3, "total": 25 },
+  "counts": { "todo": 5, "done": 2 }
+}
+```
+
+`counts` はコントローラーの `->additional([...])` で自前で足したものです。
+
+### 4-5. ステータスコードで結果を伝える
+
+Web版は「保存できたらリダイレクト」でしたが、API は**数字で結果を伝えます**。
+
+| コード | 意味 | このアプリでの使いどころ |
+|--------|------|--------------------------|
+| 200 OK | 成功 | 一覧・詳細・更新・toggle |
+| 201 Created | 作成できた | `POST /api/tasks` |
+| 204 No Content | 成功したが返す中身は無い | `DELETE /api/tasks/{id}` |
+| 404 Not Found | そのIDは無い | 存在しないIDを指定した時（自動） |
+| 422 Unprocessable | 入力内容がおかしい | バリデーション失敗（自動） |
+
+404 と 422 は**自分で書いていません**。`bootstrap/app.php` の
+
+```php
+$exceptions->shouldRenderJsonWhen(fn (Request $request) => $request->is('api/*'));
+```
+
+が「`/api/～` で例外が起きたら HTML ではなく JSON で返す」と決めているので、
+コントローラーに `try-catch` を1つも書かずに済んでいます。
+
+422 の中身はこの形で返ります。JS 側はこれを読んで画面にエラーを出しています。
+
+```json
+{ "message": "タスク名は必須です。", "errors": { "title": ["タスク名は必須です。"] } }
+```
+
+### 4-6. ハマりどころ：更新用の FormRequest を使い回さない
+
+Web版の `UpdateTaskRequest` には、こんな処理が入っています。
+
+```php
+protected function prepareForValidation(): void
+{
+    $this->merge(['is_done' => $this->boolean('is_done')]);
+}
+```
+
+これは「HTMLのチェックボックスは、外すと何も送信されない」というブラウザの仕様への対策で、
+**Web のフォームでは正しい動き**です。
+
+ところが API でこれを使い回すと事故ります。タイトルだけ直すつもりで
+
+```
+PATCH /api/tasks/1   {"title": "新しい名前"}
+```
+
+を送ると、`is_done` が送られていない → `false` 扱い → **完了済みのタスクが勝手に未完了に戻る**。
+
+そこで API 用には `App\Http\Requests\Api\UpdateTaskRequest` を別に用意し、
+`sometimes`（＝そのキーが送られてきた時だけチェックする）を使っています。
+
+```php
+'title'   => ['sometimes', 'required', 'string', 'max:255'],
+'is_done' => ['sometimes', 'boolean'],
+```
+
+これで「送った項目だけ更新される」という、PATCH 本来の動きになります。
+`ApiTaskTest::test_タイトルだけのPATCHでis_doneが巻き添えで変わらない()` がこれを見張っています。
+
+> 一方 `StoreTaskRequest`（新規作成）は余計な加工が無く、ルールもそのまま使えるので
+> Web版と共用しています。「なぜ更新だけ別なのか」がこの節の答えです。
+
+### 4-7. JavaScript 側（`tasks/api.blade.php`）
+
+全ての通信を `callApi()` という関数1本に通しています。
+
+```js
+const res = await fetch(url, {
+    method,                                  // 'GET' / 'POST' / 'PATCH' / 'DELETE'
+    headers: {
+        'Accept': 'application/json',        // JSONで返してくれ、という意思表示
+        'Content-Type': 'application/json',  // これからJSONを送るで、という宣言
+    },
+    body: JSON.stringify(body),
+});
+const json = res.status === 204 ? null : await res.json();  // 204は本文が空
+```
+
+注目してほしい点：
+
+- **CSRF トークンを1回も送っていないのに通る**（Blade版の `@csrf` と比べてみてください）
+- `escapeHtml()` を自作している
+  → Blade の `{{ }}` が自動でやってくれていた XSS 対策を、JS では自分でやる必要がある
+- `event.preventDefault()` でブラウザ標準のフォーム送信（＝リロード）を止めている
+
+### 4-8. curl で直接叩いてみる
+
+画面を経由せず、コマンドから API を叩けます。ブラウザが無くても動くのが API です。
+
+```bash
+# 一覧
+curl -s http://localhost:8086/api/tasks
+
+# 追加（201が返る）
+curl -i -X POST http://localhost:8086/api/tasks \
+  -H 'Content-Type: application/json' -H 'Accept: application/json' \
+  -d '{"title":"curlから追加","due_date":"2026-12-31"}'
+
+# バリデーションエラー（422とエラー内容が返る）
+curl -i -X POST http://localhost:8086/api/tasks \
+  -H 'Content-Type: application/json' -H 'Accept: application/json' \
+  -d '{"title":""}'
+
+# 存在しないID（404がJSONで返る）
+curl -i -H 'Accept: application/json' http://localhost:8086/api/tasks/99999
+```
+
+叩いたあとに http://localhost:8086/tasks （Blade版）を開くと、
+curl で追加したタスクがちゃんと出ます。入口が違うだけで中身は同じ、が実感できます。
+
+---
+
+## 5. よく使うコマンド
 
 すべて `docker compose exec app` を頭に付けて実行します。
 
 ```bash
 # ルート一覧を確認する（困ったらまずこれ）
 docker compose exec app php artisan route:list
+docker compose exec app php artisan route:list --path=api   # APIだけ見る
 
 # マイグレーション
 docker compose exec app php artisan migrate
@@ -117,11 +358,13 @@ docker compose exec app php artisan tinker
 
 # 雛形の生成
 docker compose exec app php artisan make:model Memo --migration --controller --resource --requests
+docker compose exec app php artisan make:controller Api/MemoController --api   # API用
+docker compose exec app php artisan make:resource MemoResource                 # JSON変換用
 ```
 
 ---
 
-## 5. 練習課題（手を動かす用）
+## 6. 練習課題（手を動かす用）
 
 上から順にやると、MVC の各レイヤーを一通り触れます。
 
@@ -146,14 +389,34 @@ docker compose exec app php artisan make:model Memo --migration --controller --r
 
 6. **リレーション**：カテゴリ機能（`categories` テーブルを作り、tasks から `belongsTo`）
 
+### API 編の課題
+
+7. **Resource だけ**：JSON に `description` が出ないようにしてみる
+   → `TaskResource::toArray()` から1行消す。画面が壊れないことも確認
+
+8. **API を1本増やす**：`GET /api/tasks/summary` で件数だけ返す
+   - `routes/api.php` に `Route::get('tasks/summary', ...)` を **apiResource より前に** 追加
+   - `{"todo": 5, "done": 2}` を返す。後ろに書くと `{task}` に吸われるので注意
+
+9. **フロントを直す**：API版の画面に「編集」機能を足す
+   - 一覧の各行に編集ボタンを置き、`PATCH /api/tasks/{id}` でタイトルを更新
+   - 422 が返ってきた時のエラー表示も忘れずに
+
+10. **テストを書く**：8 で作った summary API のテストを `ApiTaskTest` に追加
+    → `$this->getJson('/api/tasks/summary')->assertJsonPath('todo', 5)`
+
 ---
 
-## 6. つまずいたら
+## 7. つまずいたら
 
 | 症状 | 原因と対処 |
 |------|-----------|
-| 419 Page Expired | フォームに `@csrf` が無い |
+| 419 Page Expired | フォームに `@csrf` が無い（API ルートでは出ない症状） |
 | 404 | `route:list` でURLを確認。`{task}` のIDが存在しない場合も404 |
+| API が404になる | `bootstrap/app.php` の `withRouting` に `api:` があるか確認。URL の `/api` を忘れていないか |
+| API なのにHTMLが返る | リクエストに `Accept: application/json` を付ける |
+| 422 が返る | バリデーション失敗。レスポンスの `errors` に理由が入っている |
+| PATCHで意図しない項目が変わる | FormRequest の `prepareForValidation()` を疑う（→ [4-6](#4-6-ハマりどころ更新用の-formrequest-を使い回さない)） |
 | 500 / 画面が真っ白 | `docker compose logs -f app` と `src/storage/logs/laravel.log` を見る |
 | 変更が反映されない | `docker compose exec app php artisan optimize:clear` |
 | DBに繋がらない | `docker compose ps` で db が healthy か確認 |

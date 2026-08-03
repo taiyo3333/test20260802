@@ -19,6 +19,14 @@ Route::redirect('/', '/tasks');
 Route::patch('tasks/{task}/toggle', [TaskController::class, 'toggle'])
     ->name('tasks.toggle');
 
+// API学習用の画面。JavaScript から /api/tasks を叩くだけのページなので、
+// コントローラーを作らず Route::view でビューを直接返している。
+//
+// URLを /tasks/api にしていないのは、下の Route::resource が持つ
+// /tasks/{task}（show）に「{task} = "api"」として吸い込まれてしまうため。
+// toggle を resource より上に書いているのと同じ話。
+Route::view('tasks-api', 'tasks.api')->name('tasks.api');
+
 /*
 | Route::resource は以下の7つを一気に定義してくれる。
 |

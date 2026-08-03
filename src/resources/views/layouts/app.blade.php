@@ -90,13 +90,42 @@
         .pager { display: flex; justify-content: space-between; margin-top: 16px; font-size: 14px; }
         .desc { white-space: pre-wrap; }
         form.inline { display: inline; margin: 0; }
+
+        /* 画面切り替えナビ（Blade版 / API版） */
+        nav.modes { display: flex; gap: 6px; }
+        nav.modes a {
+            text-decoration: none; font-size: 13px; padding: 4px 12px; border-radius: 999px;
+            border: 1px solid var(--border); background: #fff; color: var(--muted);
+        }
+        nav.modes a.active { background: var(--text); border-color: var(--text); color: #fff; }
+
+        /* 通信ログ（API版の画面で使う） */
+        .log {
+            max-height: 260px; overflow-y: auto; background: #1f2933; color: #e4e7eb;
+            border-radius: 8px; padding: 12px 14px; font-size: 12px; line-height: 1.6;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        }
+        .log .row { padding: 2px 0; word-break: break-all; white-space: pre-wrap; }
+        .log .row + .row { border-top: 1px solid #323f4b; }
+        .log .req { color: #9fc7ff; }
+        .log .res { color: #8fe0b0; }
+        .log .err { color: #ff9d9d; }
+        .log .body { color: #b6bec9; }
+        .log .empty-log { color: #7b8794; }
     </style>
 </head>
 <body>
     <div class="wrap">
         <header class="site">
             <h1><a href="{{ route('tasks.index') }}" style="text-decoration:none;color:inherit;">📋 タスク管理</a></h1>
-            <span class="sub">Laravel MVC 学習アプリ</span>
+            {{--
+                同じデータに対する「2つの入口」を行き来できるようにする。
+                request()->routeIs() で今どちらのページにいるか判定できる。
+            --}}
+            <nav class="modes">
+                <a href="{{ route('tasks.index') }}" class="{{ request()->routeIs('tasks.api') ? '' : 'active' }}">Blade版</a>
+                <a href="{{ route('tasks.api') }}" class="{{ request()->routeIs('tasks.api') ? 'active' : '' }}">API版</a>
+            </nav>
         </header>
 
         {{-- with('status', ...) で渡されたフラッシュメッセージ。次のリクエストで自動的に消える --}}
