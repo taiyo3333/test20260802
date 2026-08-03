@@ -12,9 +12,17 @@ Laravel の MVC を「動くもの」で理解するための最小構成のタ�
 |------|-----|------|
 | Blade版 | http://localhost:8086/tasks | サーバーが HTML を組み立てて返す。操作のたびにページが再読み込みされる |
 | API版 | http://localhost:8086/tasks-api | サーバーは JSON を返すだけ。画面は JavaScript が組み立てる（リロードなし） |
+| React版 | http://localhost:5174/ | **別のサーバー**から配られたページが API だけ叩く（→ [`frontend/README.md`](../frontend/README.md)） |
 
-**どちらも同じ `tasks` テーブルを見ています。** 片方で追加したタスクはもう片方にも出ます。
-「M（Model）と DB は共通で、出口だけが2つある」という関係を確かめてみてください。
+**3つとも同じ `tasks` テーブルを見ています。** どれかで追加したタスクは他にも出ます。
+「M（Model）と DB は共通で、出口だけが3つある」という関係を確かめてみてください。
+
+React 版だけは別プロセスなので、起動にひと手間かかります。
+
+```bash
+docker compose up -d           # Laravel（API側）
+cd frontend && npm run dev     # React（別ターミナル）
+```
 
 ---
 
